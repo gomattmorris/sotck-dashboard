@@ -151,8 +151,10 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // Load API key from config
-        const FINNHUB_API_KEY = config.FINNHUB_API_KEY;
+        // Get API key from localStorage or use an empty string if not set
+        const [apiKey, setApiKey] = useState(() => {
+            return localStorage.getItem('finnhubApiKey') || '';
+        });
         
         // Indices to track
         const INDICES = [
@@ -202,6 +204,12 @@
             
             // Function to fetch stock data from Finnhub
             const fetchStockData = async () => {
+                if (!apiKey) {
+                    setError("Please enter your Finnhub API key");
+                    setLoading(false);
+                    return;
+                }
+                
                 try {
                     setLoading(true);
                     
@@ -239,7 +247,7 @@
                             
                             // Get current quote
                             const quoteResponse = await axios.get(
-                                `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${FINNHUB_API_KEY}`
+                                `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${apiKey}`
                             );
                             
                             if (quoteResponse.data) {
@@ -261,7 +269,7 @@
                             const startDate = toUnixTimestamp(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000));
                             
                             const candleResponse = await axios.get(
-                                `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${FINNHUB_API_KEY}`
+                                `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`
                             );
                             
                             if (candleResponse.data && candleResponse.data.c && candleResponse.data.t) {
@@ -338,46 +346,137 @@
                 return data;
             };
             
+            // Function to save API key
+            const saveApiKey = (key) => {
+                localStorage.setItem('finnhubApiKey', key);
+                setApiKey(key);
+            };
+            
             // Fetch data on component mount and set up interval if market is open
             useEffect(() => {
-                fetchStockData();
-                
-                // Set up polling interval (every 5 minutes if market is open)
-                const intervalId = setInterval(() => {
-                    const marketOpen = checkMarketOpen();
-                    setIsMarketOpen(marketOpen);
+                if (apiKey) {
+                    fetchStockData();
                     
-                    if (marketOpen) {
-                        fetchStockData();
-                    }
-                }, 5 * 60 * 1000);
-                
-                // Set up a daily refresh at midnight to update the previous days' data
-                const setupDailyRefresh = () => {
-                    const now = new Date();
-                    const midnight = new Date(now);
-                    midnight.setHours(24, 0, 0, 0);
+                    // Set up polling interval (every 5 minutes if market is open)
+                    const intervalId = setInterval(() => {
+                        const marketOpen = checkMarketOpen();
+                        setIsMarketOpen(marketOpen);
+                        
+                        if (marketOpen) {
+                            fetchStockData();
+                        }
+                    }, 5 * 60 * 1000);
                     
-                    const timeUntilMidnight = midnight.getTime() - now.getTime();
+                    // Set up a daily refresh at midnight to update the previous days' data
+                    const setupDailyRefresh = () => {
+                        const now = new Date();
+                        const midnight = new Date(now);
+                        midnight.setHours(24, 0, 0, 0);
+                        
+                        const timeUntilMidnight = midnight.getTime() - now.getTime();
+                        
+                        setTimeout(() => {
+                            fetchStockData();
+                            setupDailyRefresh(); // Setup for next day
+                        }, timeUntilMidnight);
+                    };
                     
-                    setTimeout(() => {
-                        fetchStockData();
-                        setupDailyRefresh(); // Setup for next day
-                    }, timeUntilMidnight);
-                };
-                
-                setupDailyRefresh();
-                
-                return () => clearInterval(intervalId);
-            }, []);
+                    setupDailyRefresh();
+                    
+                    return () => clearInterval(intervalId);
+                }
+            }, [apiKey]);
+            
+            // API Key Form
+            if (!apiKey) {
+                return (
+                    <div className="api-key-form" style={{
+                        maxWidth: "500px",
+                        margin: "50px auto",
+                        padding: "30px",
+                        borderRadius: "10px",
+                        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                        backgroundColor: "white",
+                        textAlign: "center"
+                    }}>
+                        <h1 style={{marginBottom: "20px"}}>Stock Indices Dashboard</h1>
+                        <h2 style={{marginBottom: "10px"}}>Enter your Finnhub API Key</h2>
+                        <p style={{marginBottom: "20px", color: "#666"}}>
+                            Your key will be stored in your browser only and never shared
+                        </p>
+                        <input 
+                            type="text" 
+                            placeholder="Your Finnhub API Key"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            style={{
+                                width: "100%",
+                                padding: "10px",
+                                marginBottom: "15px",
+                                borderRadius: "5px",
+                                border: "1px solid #ddd"
+                            }}
+                        />
+                        <button 
+                            onClick={() => saveApiKey(apiKey)}
+                            style={{
+                                backgroundColor: "#4CAF50",
+                                color: "white",
+                                padding: "10px 20px",
+                                border: "none",
+                                borderRadius: "5px",
+                                cursor: "pointer",
+                                fontSize: "16px"
+                            }}
+                        >
+                            Save Key & Load Dashboard
+                        </button>
+                    </div>
+                );
+            }
             
             if (loading) return <div>Loading stock data...</div>;
-            if (error) return <div>{error}</div>;
+            if (error) return (
+                <div>
+                    <p>{error}</p>
+                    {error.includes("API key") && (
+                        <button 
+                            onClick={() => setApiKey('')}
+                            style={{
+                                marginTop: "10px",
+                                padding: "5px 10px",
+                                backgroundColor: "#f44336",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer"
+                            }}
+                        >
+                            Enter New API Key
+                        </button>
+                    )}
+                </div>
+            );
             
             return (
                 <div className="dashboard">
                     <div className="header">
                         <h1>Stock Indices Dashboard</h1>
+                        <button 
+                            onClick={() => setApiKey('')}
+                            style={{
+                                marginTop: "10px",
+                                padding: "5px 10px",
+                                backgroundColor: "#f1f1f1",
+                                color: "#333",
+                                border: "1px solid #ddd",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "12px"
+                            }}
+                        >
+                            Change API Key
+                        </button>
                     </div>
                     
                     {stockData.map((dayData, dayIndex) => (
