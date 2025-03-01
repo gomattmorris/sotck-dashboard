@@ -151,11 +151,6 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // Get API key from localStorage or use an empty string if not set
-        const [apiKey, setApiKey] = useState(() => {
-            return localStorage.getItem('finnhubApiKey') || '';
-        });
-        
         // Indices to track
         const INDICES = [
             { symbol: "^DJI", name: "Dow Jones" },
@@ -169,6 +164,15 @@
             const [error, setError] = useState(null);
             const [lastUpdated, setLastUpdated] = useState(null);
             const [isMarketOpen, setIsMarketOpen] = useState(false);
+            const [apiKey, setApiKey] = useState(() => {
+                return localStorage.getItem('finnhubApiKey') || '';
+            });
+            
+            // Function to save API key
+            const saveApiKey = (key) => {
+                localStorage.setItem('finnhubApiKey', key);
+                setApiKey(key);
+            };
             
             // Function to check if market is open (simplified)
             const checkMarketOpen = () => {
@@ -200,6 +204,40 @@
                     }
                 }
                 return null;
+            };
+            
+            // Handle API errors by using fallback data
+            const handleApiError = () => {
+                console.log("Using fallback data due to API error");
+                const data = [];
+                const today = new Date();
+                
+                // Generate fallback data for 5 days
+                for (let i = 0; i < 5; i++) {
+                    const date = new Date();
+                    date.setDate(today.getDate() - i);
+                    
+                    const dayData = {
+                        date: date,
+                        indices: INDICES.map(index => {
+                            const baseValue = index.symbol === "^DJI" ? 34000 : 
+                                             index.symbol === "^GSPC" ? 4200 : 14000;
+                            const randomChange = (Math.random() * 3 - 1.5).toFixed(2);
+                            const value = baseValue + (baseValue * (randomChange / 100));
+                            
+                            return {
+                                symbol: index.symbol,
+                                name: index.name,
+                                value: value.toFixed(2),
+                                percentChange: randomChange
+                            };
+                        })
+                    };
+                    
+                    data.push(dayData);
+                }
+                
+                return data;
             };
             
             // Function to fetch stock data from Finnhub
@@ -242,8 +280,8 @@
                             
                             // For Dow Jones, use the DIA ETF as a proxy
                             const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
-                                                 symbol === 'GSPC' ? 'SPY' : 
-                                                 symbol === 'IXIC' ? 'QQQ' : symbol;
+                                                symbol === 'GSPC' ? 'SPY' : 
+                                                symbol === 'IXIC' ? 'QQQ' : symbol;
                             
                             // Get current quote
                             const quoteResponse = await axios.get(
@@ -310,46 +348,6 @@
                     setError("Failed to fetch stock data. Please try again later.");
                     setLoading(false);
                 }
-            };
-            
-            // Function to handle API errors by using fallback data
-            const handleApiError = () => {
-                console.log("Using fallback data due to API error");
-                const data = [];
-                const today = new Date();
-                
-                // Generate fallback data for 5 days
-                for (let i = 0; i < 5; i++) {
-                    const date = new Date();
-                    date.setDate(today.getDate() - i);
-                    
-                    const dayData = {
-                        date: date,
-                        indices: INDICES.map(index => {
-                            const baseValue = index.symbol === "^DJI" ? 34000 : 
-                                             index.symbol === "^GSPC" ? 4200 : 14000;
-                            const randomChange = (Math.random() * 3 - 1.5).toFixed(2);
-                            const value = baseValue + (baseValue * (randomChange / 100));
-                            
-                            return {
-                                symbol: index.symbol,
-                                name: index.name,
-                                value: value.toFixed(2),
-                                percentChange: randomChange
-                            };
-                        })
-                    };
-                    
-                    data.push(dayData);
-                }
-                
-                return data;
-            };
-            
-            // Function to save API key
-            const saveApiKey = (key) => {
-                localStorage.setItem('finnhubApiKey', key);
-                setApiKey(key);
             };
             
             // Fetch data on component mount and set up interval if market is open
