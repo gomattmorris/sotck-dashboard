@@ -262,26 +262,27 @@
             const [error, setError] = useState(null);
             const [lastUpdated, setLastUpdated] = useState(null);
             const [isMarketOpen, setIsMarketOpen] = useState(false);
-            const [apiKey, setApiKey] = useState(() => {
-                return localStorage.getItem('finnhubApiKey') || '';
-            });
-            const [useRealData, setUseRealData] = useState(() => {
-                const savedPref = localStorage.getItem('useRealData');
-                return savedPref === 'false' ? false : true; // Default to true unless explicitly set to false
-            });
+            const [apiKeyInput, setApiKeyInput] = useState('');
+            const [useRealData, setUseRealData] = useState(false); // Default to mock data
             const [dataSource, setDataSource] = useState('simulated');
-            
-            // Function to save API key
-            const saveApiKey = (key) => {
-                localStorage.setItem('finnhubApiKey', key);
-                setApiKey(key);
-            };
+            const [showApiKeyForm, setShowApiKeyForm] = useState(false);
             
             // Function to toggle data source preference
             const toggleDataSource = (useReal) => {
-                localStorage.setItem('useRealData', useReal);
                 setUseRealData(useReal);
-                fetchData(useReal);
+                if (useReal) {
+                    setShowApiKeyForm(true);
+                } else {
+                    fetchData(null); // Use mock data
+                }
+            };
+            
+            // Function to save API key and fetch real data
+            const saveApiKeyAndFetch = () => {
+                if (apiKeyInput.trim()) {
+                    setShowApiKeyForm(false);
+                    fetchData(apiKeyInput);
+                }
             };
             
             // Function to check if market is currently open
@@ -434,10 +435,12 @@
             };
             
             // Function to fetch real data from Finnhub
-            const fetchRealData = async () => {
+            const fetchRealData = async (apiKey) => {
                 if (!apiKey) {
                     throw new Error("API key required for real data");
                 }
+                
+                console.log("Attempting to fetch real data with API key");
                 
                 const tradingDays = getTradingDays();
                 
@@ -452,10 +455,8 @@
                     }))
                 }));
                 
-                // Create a proxy URL to avoid CORS issues
-                const createProxyUrl = (url) => {
-                    return `https://corsproxy.io/?${encodeURIComponent(url)}`;
-                };
+                // Check if we're in a test/development environment
+                console.log("Using direct API calls without proxy");
                 
                 // Fetch data for each index
                 for (let indexIdx = 0; indexIdx < INDICES.length; indexIdx++) {
@@ -466,8 +467,8 @@
                         
                         // For Dow Jones, use the DIA ETF as a proxy
                         const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
-                                             symbol === 'GSPC' ? 'SPY' : 
-                                             symbol === 'IXIC' ? 'QQQ' : symbol;
+                                            symbol === 'GSPC' ? 'SPY' : 
+                                            symbol === 'IXIC' ? 'QQQ' : symbol;
                         
                         // Format dates for API in UNIX timestamp (seconds)
                         const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
@@ -475,13 +476,14 @@
                         const endDate = toUnixTimestamp(now);
                         const startDate = toUnixTimestamp(new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)); // 14 days ago
                         
-                        // Use a CORS proxy for the request
+                        // Direct API call (no proxy)
                         const url = `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`;
-                        const proxyUrl = createProxyUrl(url);
                         
-                        const response = await axios.get(proxyUrl);
+                        console.log(`Fetching data for ${index.name}`);
+                        const response = await axios.get(url);
                         
                         if (response.data && response.data.s === 'ok' && response.data.c && response.data.t) {
+                            console.log(`Received valid data for ${index.name}`);
                             const prices = response.data.c;
                             const timestamps = response.data.t;
                             
@@ -513,6 +515,9 @@
                                     }
                                 }
                             }
+                        } else {
+                            console.warn(`Invalid or empty data received for ${index.name}`);
+                            throw new Error(`Invalid data for ${index.name}`);
                         }
                     } catch (err) {
                         console.error(`Error fetching data for ${index.name}:`, err);
@@ -533,7 +538,7 @@
             };
             
             // Main function to fetch data (either real or mock)
-            const fetchData = async (useReal = useRealData) => {
+            const fetchData = async (apiKey = null) => {
                 setLoading(true);
                 setError(null);
                 
@@ -541,11 +546,12 @@
                     let data;
                     let source;
                     
-                    if (useReal && apiKey) {
+                    if (apiKey && useRealData) {
                         try {
-                            data = await fetchRealData();
+                            console.log("Attempting to fetch real data");
+                            data = await fetchRealData(apiKey);
                             source = 'real';
-                            console.log("Using real data from Finnhub");
+                            console.log("Successfully fetched real data");
                         } catch (err) {
                             console.error("Error fetching real data, falling back to mock:", err);
                             data = generateMockData();
@@ -569,7 +575,7 @@
                 }
             };
             
-            // Load data on mount and when API key or useRealData changes
+            // Load data on mount
             useEffect(() => {
                 fetchData();
                 
@@ -579,7 +585,7 @@
                     setIsMarketOpen(marketOpen);
                     
                     if (marketOpen) {
-                        fetchData();
+                        fetchData(useRealData ? apiKeyInput : null);
                     }
                 }, 5 * 60 * 1000);
                 
@@ -592,7 +598,7 @@
                     const timeUntilMidnight = midnight.getTime() - now.getTime();
                     
                     setTimeout(() => {
-                        fetchData();
+                        fetchData(useRealData ? apiKeyInput : null);
                         setupDailyRefresh(); // Setup for next day
                     }, timeUntilMidnight);
                 };
@@ -600,36 +606,40 @@
                 setupDailyRefresh();
                 
                 return () => clearInterval(intervalId);
-            }, [apiKey, useRealData]);
+            }, []);
             
             // API Key Form
-            if (useRealData && !apiKey) {
+            if (showApiKeyForm) {
                 return (
                     <div className="api-key-form">
                         <h1 style={{marginBottom: "20px"}}>Stock Indices Dashboard</h1>
                         <h2 style={{marginBottom: "10px"}}>Enter your Finnhub API Key</h2>
                         <p style={{marginBottom: "20px", color: "#666"}}>
-                            Your key will be stored in your browser only and never shared
+                            This will not be stored persistently - you'll need to re-enter it if you refresh the page
                         </p>
                         <input 
                             className="input-field"
                             type="text" 
                             placeholder="Your Finnhub API Key"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
+                            value={apiKeyInput}
+                            onChange={(e) => setApiKeyInput(e.target.value)}
                         />
                         <button 
                             className="primary-button"
-                            onClick={() => saveApiKey(apiKey)}
+                            onClick={saveApiKeyAndFetch}
                         >
-                            Save Key & Load Dashboard
+                            Use This API Key
                         </button>
                         <div style={{marginTop: "20px"}}>
                             <button 
                                 className="secondary-button"
-                                onClick={() => toggleDataSource(false)}
+                                onClick={() => {
+                                    setShowApiKeyForm(false);
+                                    setUseRealData(false);
+                                    fetchData(null);
+                                }}
                             >
-                                Use Simulated Data Instead
+                                Cancel & Use Simulated Data
                             </button>
                         </div>
                     </div>
@@ -643,7 +653,7 @@
                     <button 
                         className="primary-button"
                         style={{marginTop: "10px"}}
-                        onClick={() => fetchData()}
+                        onClick={() => fetchData(useRealData ? apiKeyInput : null)}
                     >
                         Try Again
                     </button>
@@ -674,7 +684,7 @@
                         {useRealData && (
                             <button 
                                 className="secondary-button"
-                                onClick={() => setApiKey('')}
+                                onClick={() => setShowApiKeyForm(true)}
                             >
                                 Change API Key
                             </button>
@@ -683,7 +693,7 @@
                         <button 
                             className="secondary-button"
                             style={{marginLeft: "10px"}}
-                            onClick={() => fetchData()}
+                            onClick={() => fetchData(useRealData ? apiKeyInput : null)}
                         >
                             Refresh Data
                         </button>
