@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Indices Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.21.2/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.3.4/axios.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f7;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .dashboard {
+            max-width: 100%;
+        }
+        
+        .date-row {
+            margin-bottom: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+        
+        .date-header {
+            background-color: #333;
+            color: white;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            gap: 5px;
+        }
+        
+        .live-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            background-color: #ff3b30;
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+            100% {
+                opacity: 1;
+            }
+        }
+        
+        .indices {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        
+        .index-box {
+            flex: 1;
+            min-width: 200px;
+            padding: 20px;
+            text-align: center;
+            border-right: 1px solid #eee;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .index-box:last-child {
+            border-right: none;
+        }
+        
+        .index-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .index-value {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .percentage {
+            font-size: 20px;
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: inline-block;
+        }
+        
+        .percentage.positive {
+            background-color: rgba(52, 199, 89, 0.2);
+            color: #34c759;
+        }
+        
+        .percentage.negative {
+            background-color: rgba(255, 59, 48, 0.2);
+            color: #ff3b30;
+        }
+        
+        .week-change {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .header {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .last-updated {
+            text-align: right;
+            margin-top: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 768px) {
+            .index-box {
+                min-width: 100%;
+                border-right: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // Your Finnhub API key
+        const FINNHUB_API_KEY = "cv1ijthr01qngf08sr4gcv1ijthr01qngf08sr50";
+        
+        // Indices to track
+        const INDICES = [
+            { symbol: "^DJI", name: "Dow Jones" },
+            { symbol: "^GSPC", name: "S&P 500" },
+            { symbol: "^IXIC", name: "NASDAQ" }
+        ];
+        
+        function StockDashboard() {
+            const [stockData, setStockData] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [lastUpdated, setLastUpdated] = useState(null);
+            const [isMarketOpen, setIsMarketOpen] = useState(false);
+            
+            // Function to check if market is open (simplified)
+            const checkMarketOpen = () => {
+                const now = new Date();
+                const day = now.getDay();
+                const hours = now.getHours();
+                
+                // Market is open Monday-Friday, 9:30 AM - 4:00 PM ET (simplified)
+                return day >= 1 && day <= 5 && hours >= 9 && hours < 16;
+            };
+            
+            // Function to format date
+            const formatDate = (date) => {
+                return new Date(date).toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric'
+                });
+            };
+            
+            // Function to calculate week change
+            const calculateWeekChange = (data, index) => {
+                if (index === 0 && data.length >= 5) {
+                    const latestValue = parseFloat(data[0]?.value || 0);
+                    const weekAgoValue = parseFloat(data[4]?.value || 0);
+                    if (latestValue && weekAgoValue) {
+                        const change = ((latestValue - weekAgoValue) / weekAgoValue * 100).toFixed(2);
+                        return change;
+                    }
+                }
+                return null;
+            };
+            
+            // Function to fetch stock data from Finnhub
+            const fetchStockData = async () => {
+                try {
+                    setLoading(true);
+                    
+                    // Get current date and previous dates
+                    const today = new Date();
+                    const dates = [];
+                    
+                    for (let i = 0; i < 5; i++) {
+                        const date = new Date();
+                        date.setDate(today.getDate() - i);
+                        dates.push(date);
+                    }
+                    
+                    // Prepare result data structure
+                    const resultData = dates.map(date => ({
+                        date: date,
+                        indices: INDICES.map(index => ({
+                            symbol: index.symbol,
+                            name: index.name,
+                            value: 0,
+                            percentChange: 0
+                        }))
+                    }));
+                    
+                    // Fetch data for each index
+                    const promises = INDICES.map(async (index, indexIdx) => {
+                        try {
+                            // Remove the ^ character from indices symbols for Finnhub
+                            const symbol = index.symbol.replace('^', '');
+                            
+                            // For Dow Jones, use the DIA ETF as a proxy
+                            const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
+                                                 symbol === 'GSPC' ? 'SPY' : 
+                                                 symbol === 'IXIC' ? 'QQQ' : symbol;
+                            
+                            // Get current quote
+                            const quoteResponse = await axios.get(
+                                `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${FINNHUB_API_KEY}`
+                            );
+                            
+                            if (quoteResponse.data) {
+                                // Current day data
+                                resultData[0].indices[indexIdx].value = quoteResponse.data.c.toFixed(2);
+                                resultData[0].indices[indexIdx].percentChange = 
+                                    ((quoteResponse.data.c - quoteResponse.data.pc) / quoteResponse.data.pc * 100).toFixed(2);
+                                
+                                // Previous day close becomes the value for day 1
+                                resultData[1].indices[indexIdx].value = quoteResponse.data.pc.toFixed(2);
+                            }
+                            
+                            // For previous days, we'll need to get historical data
+                            // Format dates for API in UNIX timestamp (seconds)
+                            const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
+                            
+                            // We'll get candle data for the last 7 days to have enough data
+                            const endDate = toUnixTimestamp(today);
+                            const startDate = toUnixTimestamp(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000));
+                            
+                            const candleResponse = await axios.get(
+                                `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${FINNHUB_API_KEY}`
+                            );
+                            
+                            if (candleResponse.data && candleResponse.data.c && candleResponse.data.t) {
+                                // Process historical data
+                                const closePrices = candleResponse.data.c;
+                                const timestamps = candleResponse.data.t;
+                                
+                                // Fill in historical data for days 1-4
+                                for (let i = 1; i < 5 && i < closePrices.length; i++) {
+                                    const price = closePrices[closePrices.length - i - 1];
+                                    const prevPrice = closePrices[closePrices.length - i];
+                                    
+                                    // Skip first day as we already have it from quote
+                                    if (i >= 2) {
+                                        resultData[i].indices[indexIdx].value = price.toFixed(2);
+                                    }
+                                    
+                                    // Calculate percent change
+                                    if (i >= 1) {
+                                        resultData[i].indices[indexIdx].percentChange = 
+                                            ((prevPrice - price) / price * 100).toFixed(2);
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.error(`Error fetching data for ${index.name}:`, err);
+                        }
+                    });
+                    
+                    await Promise.all(promises);
+                    
+                    setStockData(resultData);
+                    setLastUpdated(new Date());
+                    setIsMarketOpen(checkMarketOpen());
+                    setLoading(false);
+                } catch (err) {
+                    console.error("Failed to fetch stock data:", err);
+                    setError("Failed to fetch stock data. Please try again later.");
+                    setLoading(false);
+                }
+            };
+            
+            // Function to handle API errors by using fallback data
+            const handleApiError = () => {
+                console.log("Using fallback data due to API error");
+                const data = [];
+                const today = new Date();
+                
+                // Generate fallback data for 5 days
+                for (let i = 0; i < 5; i++) {
+                    const date = new Date();
+                    date.setDate(today.getDate() - i);
+                    
+                    const dayData = {
+                        date: date,
+                        indices: INDICES.map(index => {
+                            const baseValue = index.symbol === "^DJI" ? 34000 : 
+                                             index.symbol === "^GSPC" ? 4200 : 14000;
+                            const randomChange = (Math.random() * 3 - 1.5).toFixed(2);
+                            const value = baseValue + (baseValue * (randomChange / 100));
+                            
+                            return {
+                                symbol: index.symbol,
+                                name: index.name,
+                                value: value.toFixed(2),
+                                percentChange: randomChange
+                            };
+                        })
+                    };
+                    
+                    data.push(dayData);
+                }
+                
+                return data;
+            };
+            
+            // Fetch data on component mount and set up interval if market is open
+            useEffect(() => {
+                fetchStockData();
+                
+                // Set up polling interval (every 5 minutes if market is open)
+                const intervalId = setInterval(() => {
+                    const marketOpen = checkMarketOpen();
+                    setIsMarketOpen(marketOpen);
+                    
+                    if (marketOpen) {
+                        fetchStockData();
+                    }
+                }, 5 * 60 * 1000);
+                
+                // Set up a daily refresh at midnight to update the previous days' data
+                const setupDailyRefresh = () => {
+                    const now = new Date();
+                    const midnight = new Date(now);
+                    midnight.setHours(24, 0, 0, 0);
+                    
+                    const timeUntilMidnight = midnight.getTime() - now.getTime();
+                    
+                    setTimeout(() => {
+                        fetchStockData();
+                        setupDailyRefresh(); // Setup for next day
+                    }, timeUntilMidnight);
+                };
+                
+                setupDailyRefresh();
+                
+                return () => clearInterval(intervalId);
+            }, []);
+            
+            if (loading) return <div>Loading stock data...</div>;
+            if (error) return <div>{error}</div>;
+            
+            return (
+                <div className="dashboard">
+                    <div className="header">
+                        <h1>Stock Indices Dashboard</h1>
+                    </div>
+                    
+                    {stockData.map((dayData, dayIndex) => (
+                        <div className="date-row" key={dayIndex}>
+                            <div className="date-header">
+                                <div>{formatDate(dayData.date)}</div>
+                                {dayIndex === 0 && isMarketOpen && (
+                                    <div className="live-indicator">
+                                        <span className="live-dot"></span>
+                                        <span>LIVE</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="indices">
+                                {dayData.indices.map((index, indexIndex) => {
+                                    const weekChange = calculateWeekChange(
+                                        stockData.map(d => d.indices[indexIndex]),
+                                        dayIndex
+                                    );
+                                    
+                                    return (
+                                        <div className="index-box" key={index.symbol}>
+                                            <div className="index-name">{index.name}</div>
+                                            <div className="index-value">{index.value}</div>
+                                            <div className={`percentage ${parseFloat(index.percentChange) >= 0 ? 'positive' : 'negative'}`}>
+                                                {parseFloat(index.percentChange) >= 0 ? '+' : ''}{index.percentChange}%
+                                            </div>
+                                            {dayIndex === 0 && weekChange && (
+                                                <div className="week-change">
+                                                    Week: {parseFloat(weekChange) >= 0 ? '+' : ''}{weekChange}%
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
+                    
+                    <div className="last-updated">
+                        Last updated: {lastUpdated?.toLocaleTimeString()}
+                    </div>
+                </div>
+            );
+        }
+        
+        ReactDOM.render(<StockDashboard />, document.getElementById('root'));
+    </script>
+</body>
+</html>
