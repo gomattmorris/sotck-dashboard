@@ -220,12 +220,6 @@
             color: #666;
         }
         
-        .debug-info {
-            font-size: 10px;
-            color: #999;
-            margin-top: 2px;
-        }
-        
         @media (max-width: 768px) {
             .index-box {
                 min-width: 100%;
@@ -308,12 +302,20 @@
                 return day >= 1 && day <= 5 && hours >= 9 && hours < 16;
             };
             
+            // Function to check if a date is a valid trading day (Mon-Fri)
+            const isTradingDay = (dateStr) => {
+                const date = new Date(dateStr);
+                const day = date.getDay();
+                return day >= 1 && day <= 5; // Monday (1) through Friday (5)
+            };
+            
             // Function to format date
             const formatDate = (date) => {
-                return new Date(date).toLocaleDateString('en-US', {
+                return date.toLocaleDateString('en-US', {
                     weekday: 'short',
                     month: 'short',
-                    day: 'numeric'
+                    day: 'numeric',
+                    timeZone: 'UTC' // Ensure consistent date interpretation
                 });
             };
             
@@ -394,19 +396,19 @@
             // Process time series data into the format we need
             const processTimeSeriesData = (indexData) => {
                 // Get all available dates from the data
-                const allDates = new Set();
+                const tradingDates = new Set();
                 
-                // Collect all dates from all indices
-                INDICES.forEach(index => {
-                    const data = indexData[index.symbol];
-                    if (data) {
-                        Object.keys(data).forEach(date => allDates.add(date));
-                    }
-                });
+                // First symbol (DIA) will be our reference for available dates
+                const diaData = indexData["DIA"];
+                if (diaData) {
+                    Object.keys(diaData)
+                        .filter(dateStr => isTradingDay(dateStr)) // Make extra sure we only have trading days
+                        .forEach(date => tradingDates.add(date));
+                }
                 
                 // Convert to array and sort descending (newest first)
-                const sortedDates = Array.from(allDates).sort().reverse();
-                console.log("Available dates:", sortedDates);
+                const sortedDates = Array.from(tradingDates).sort().reverse();
+                console.log("Available trading dates:", sortedDates);
                 
                 // Take only the 5 most recent trading days
                 const recentDates = sortedDates.slice(0, 5);
@@ -417,7 +419,6 @@
                     
                     return {
                         date: date,
-                        dateString: dateStr, // Keep the original date string for debugging
                         indices: INDICES.map(index => {
                             const data = indexData[index.symbol];
                             
@@ -600,7 +601,6 @@
                                             <div className={`percentage ${parseFloat(index.percentChange) >= 0 ? 'positive' : 'negative'}`}>
                                                 {parseFloat(index.percentChange) >= 0 ? '+' : ''}{index.percentChange}%
                                             </div>
-                                            <div className="debug-info">{dayData.dateString}</div>
                                         </div>
                                     );
                                 })}
