@@ -96,17 +96,13 @@
             font-size: 18px;
         }
         
-        .index-value {
-            font-size: 24px;
-            margin-bottom: 5px;
-        }
-        
         .percentage {
-            font-size: 20px;
+            font-size: 32px;
             font-weight: bold;
-            padding: 5px 10px;
-            border-radius: 5px;
+            padding: 10px 15px;
+            border-radius: 8px;
             display: inline-block;
+            margin: 15px 0;
         }
         
         .percentage.positive {
@@ -117,12 +113,6 @@
         .percentage.negative {
             background-color: rgba(255, 59, 48, 0.2);
             color: #ff3b30;
-        }
-        
-        .week-change {
-            margin-top: 10px;
-            font-size: 14px;
-            color: #666;
         }
         
         .header {
@@ -230,6 +220,12 @@
             color: #666;
         }
         
+        .debug-info {
+            font-size: 10px;
+            color: #999;
+            margin-top: 2px;
+        }
+        
         @media (max-width: 768px) {
             .index-box {
                 min-width: 100%;
@@ -244,11 +240,11 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // Real indices with multipliers to get actual index values from ETFs
+        // Indices to track
         const INDICES = [
-            { symbol: "DIA", name: "Dow Jones", multiplier: 100, actualValue: 33000 },
-            { symbol: "SPY", name: "S&P 500", multiplier: 10, actualValue: 5000 },
-            { symbol: "QQQ", name: "NASDAQ", multiplier: 40, actualValue: 18000 }
+            { symbol: "DIA", name: "Dow Jones" },
+            { symbol: "SPY", name: "S&P 500" },
+            { symbol: "QQQ", name: "NASDAQ" }
         ];
         
         function StockDashboard() {
@@ -312,12 +308,6 @@
                 return day >= 1 && day <= 5 && hours >= 9 && hours < 16;
             };
             
-            // Function to check if a date is a trading day (M-F)
-            const isTradingDay = (date) => {
-                const day = date.getDay();
-                return day >= 1 && day <= 5; // Monday through Friday
-            };
-            
             // Function to format date
             const formatDate = (date) => {
                 return new Date(date).toLocaleDateString('en-US', {
@@ -325,12 +315,6 @@
                     month: 'short',
                     day: 'numeric'
                 });
-            };
-            
-            // Calculate the actual index value from ETF price
-            const calculateActualIndexValue = (etfPrice, index) => {
-                // This is an approximation - ETFs track indices but aren't exact multiples
-                return parseFloat(etfPrice) * index.multiplier;
             };
             
             // Function to fetch data from Alpha Vantage
@@ -422,13 +406,10 @@
                 
                 // Convert to array and sort descending (newest first)
                 const sortedDates = Array.from(allDates).sort().reverse();
-                
-                // Keep only trading days (Mon-Fri) - now done implicitly by API results
-                // The API only returns trading days, so no need to filter by day of week
-                const tradingDates = sortedDates;
+                console.log("Available dates:", sortedDates);
                 
                 // Take only the 5 most recent trading days
-                const recentDates = tradingDates.slice(0, 5);
+                const recentDates = sortedDates.slice(0, 5);
                 
                 // Create the processed data structure
                 const processedData = recentDates.map(dateStr => {
@@ -436,36 +417,31 @@
                     
                     return {
                         date: date,
+                        dateString: dateStr, // Keep the original date string for debugging
                         indices: INDICES.map(index => {
                             const data = indexData[index.symbol];
                             
                             // Default values if no data available
-                            let value = 0;
-                            let etfValue = 0;
                             let percentChange = 0;
                             
                             if (data && data[dateStr]) {
-                                // Get current day's closing price for the ETF
-                                etfValue = parseFloat(data[dateStr]['4. close']);
-                                
-                                // Convert to actual index value using multiplier
-                                value = calculateActualIndexValue(etfValue, index);
+                                // Get current day's closing price
+                                const currentClose = parseFloat(data[dateStr]['4. close']);
                                 
                                 // Find the previous trading day
-                                const dateIndex = tradingDates.indexOf(dateStr);
-                                const previousDateStr = dateIndex < tradingDates.length - 1 ? tradingDates[dateIndex + 1] : null;
+                                const dateIndex = sortedDates.indexOf(dateStr);
+                                const previousDateStr = dateIndex < sortedDates.length - 1 ? sortedDates[dateIndex + 1] : null;
                                 
                                 // Calculate percent change if previous day is available
                                 if (previousDateStr && data[previousDateStr]) {
                                     const previousClose = parseFloat(data[previousDateStr]['4. close']);
-                                    percentChange = ((etfValue - previousClose) / previousClose * 100);
+                                    percentChange = ((currentClose - previousClose) / previousClose * 100);
                                 }
                             }
                             
                             return {
                                 symbol: index.symbol,
                                 name: index.name,
-                                value: value.toFixed(0), // No decimals for index values
                                 percentChange: percentChange.toFixed(2)
                             };
                         })
@@ -621,10 +597,10 @@
                                     return (
                                         <div className="index-box" key={index.symbol}>
                                             <div className="index-name">{index.name}</div>
-                                            <div className="index-value">{index.value}</div>
                                             <div className={`percentage ${parseFloat(index.percentChange) >= 0 ? 'positive' : 'negative'}`}>
                                                 {parseFloat(index.percentChange) >= 0 ? '+' : ''}{index.percentChange}%
                                             </div>
+                                            <div className="debug-info">{dayData.dateString}</div>
                                         </div>
                                     );
                                 })}
