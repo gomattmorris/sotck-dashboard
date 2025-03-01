@@ -235,6 +235,28 @@
             transform: translateX(20px);
         }
         
+        .error-message {
+            color: #ff3b30;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        
+        .usage-info {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 13px;
+            color: #666;
+            text-align: center;
+        }
+        
+        .requests-counter {
+            font-weight: bold;
+            color: #2196F3;
+        }
+        
         @media (max-width: 768px) {
             .index-box {
                 min-width: 100%;
@@ -249,11 +271,11 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // Indices to track
+        // Indices to track (with their Alpha Vantage symbols)
         const INDICES = [
-            { symbol: "^DJI", name: "Dow Jones" },
-            { symbol: "^GSPC", name: "S&P 500" },
-            { symbol: "^IXIC", name: "NASDAQ" }
+            { symbol: "DIA", name: "Dow Jones" },
+            { symbol: "SPY", name: "S&P 500" },
+            { symbol: "QQQ", name: "NASDAQ" }
         ];
         
         function StockDashboard() {
@@ -266,22 +288,58 @@
             const [useRealData, setUseRealData] = useState(false); // Default to mock data
             const [dataSource, setDataSource] = useState('simulated');
             const [showApiKeyForm, setShowApiKeyForm] = useState(false);
+            const [apiErrorMessage, setApiErrorMessage] = useState('');
+            const [requestCount, setRequestCount] = useState(() => {
+                const savedCount = localStorage.getItem('alphaVantageRequestCount');
+                return savedCount ? parseInt(savedCount, 10) : 0;
+            });
+            const [requestDate, setRequestDate] = useState(() => {
+                return localStorage.getItem('alphaVantageRequestDate') || new Date().toDateString();
+            });
+            
+            // Reset request count if date changes
+            useEffect(() => {
+                const today = new Date().toDateString();
+                if (requestDate !== today) {
+                    setRequestCount(0);
+                    setRequestDate(today);
+                    localStorage.setItem('alphaVantageRequestCount', '0');
+                    localStorage.setItem('alphaVantageRequestDate', today);
+                }
+            }, [requestDate]);
+            
+            // Function to increment request count
+            const incrementRequestCount = () => {
+                const newCount = requestCount + 1;
+                setRequestCount(newCount);
+                localStorage.setItem('alphaVantageRequestCount', newCount.toString());
+            };
+            
+            // Alpha Vantage API key from localStorage
+            const [apiKey, setApiKey] = useState(() => {
+                return localStorage.getItem('alphaVantageApiKey') || '';
+            });
             
             // Function to toggle data source preference
             const toggleDataSource = (useReal) => {
                 setUseRealData(useReal);
-                if (useReal) {
+                if (useReal && !apiKey) {
                     setShowApiKeyForm(true);
                 } else {
-                    fetchData(null); // Use mock data
+                    fetchData(useReal ? apiKey : null);
                 }
             };
             
             // Function to save API key and fetch real data
             const saveApiKeyAndFetch = () => {
                 if (apiKeyInput.trim()) {
+                    const key = apiKeyInput.trim();
+                    localStorage.setItem('alphaVantageApiKey', key);
+                    setApiKey(key);
                     setShowApiKeyForm(false);
-                    fetchData(apiKeyInput);
+                    fetchData(key);
+                } else {
+                    setApiErrorMessage('Please enter a valid API key');
                 }
             };
             
@@ -308,19 +366,6 @@
                     month: 'short',
                     day: 'numeric'
                 });
-            };
-            
-            // Function to calculate week change
-            const calculateWeekChange = (data, index) => {
-                if (index === 0 && data.length >= 5) {
-                    const latestValue = parseFloat(data[0]?.value || 0);
-                    const weekAgoValue = parseFloat(data[4]?.value || 0);
-                    if (latestValue && weekAgoValue) {
-                        const change = ((latestValue - weekAgoValue) / weekAgoValue * 100).toFixed(2);
-                        return change;
-                    }
-                }
-                return null;
             };
             
             // Generate mock data for trading days
@@ -352,11 +397,11 @@
                 }
                 
                 // Make the data somewhat realistic with trends
-                // Base values for indices
+                // Base values for indices based on recent values
                 const baseValues = {
-                    "^DJI": 33900,
-                    "^GSPC": 4130,
-                    "^IXIC": 12800
+                    "DIA": 366.5,
+                    "SPY": 448.2,
+                    "QQQ": 385.9
                 };
                 
                 // Generate a random trend direction and magnitude for the week
@@ -399,52 +444,23 @@
                 return mockData;
             };
             
-            // Function to get trading days
-            const getTradingDays = () => {
-                const today = new Date();
-                const tradingDays = [];
-                let dayCounter = 0;
-                
-                // Collect the last 5 trading days (weekdays)
-                while (tradingDays.length < 5) {
-                    const date = new Date();
-                    date.setDate(today.getDate() - dayCounter);
-                    
-                    // Only include weekdays
-                    if (isTradingDay(date)) {
-                        // For current day, only include if market has opened today
-                        // (prevents showing Saturday/Sunday as current day)
-                        if (dayCounter === 0) {
-                            const currentDay = date.getDay();
-                            if (currentDay >= 1 && currentDay <= 5) {
-                                tradingDays.push(date);
-                            }
-                        } else {
-                            tradingDays.push(date);
-                        }
-                    }
-                    
-                    dayCounter++;
-                    if (dayCounter > 10) break; // Safety check
-                }
-                
-                // Sort trading days in descending order (newest first)
-                tradingDays.sort((a, b) => b - a);
-                
-                return tradingDays;
-            };
-            
-            // Function to fetch real data from Finnhub
+            // Function to fetch real data from Alpha Vantage
             const fetchRealData = async (apiKey) => {
                 if (!apiKey) {
                     throw new Error("API key required for real data");
                 }
                 
-                console.log("Attempting to fetch real data with API key");
+                if (requestCount >= 25) {
+                    throw new Error("Daily API request limit reached (25/25). Please try again tomorrow or use simulated data.");
+                }
                 
-                const tradingDays = getTradingDays();
+                console.log("Fetching real data from Alpha Vantage");
                 
-                // Prepare result data structure with empty values
+                // Get trading days (we'll only show today for real data to minimize API calls)
+                const today = new Date();
+                const tradingDays = [today]; // Just show today to save API calls
+                
+                // Initialize result data structure
                 const resultData = tradingDays.map(date => ({
                     date: date,
                     indices: INDICES.map(index => ({
@@ -455,83 +471,52 @@
                     }))
                 }));
                 
-                // Check if we're in a test/development environment
-                console.log("Using direct API calls without proxy");
-                
                 // Fetch data for each index
-                for (let indexIdx = 0; indexIdx < INDICES.length; indexIdx++) {
-                    const index = INDICES[indexIdx];
+                for (let i = 0; i < INDICES.length; i++) {
+                    const index = INDICES[i];
                     try {
-                        // Remove the ^ character from indices symbols for Finnhub
-                        const symbol = index.symbol.replace('^', '');
+                        // Increment request counter before making API call
+                        incrementRequestCount();
                         
-                        // For Dow Jones, use the DIA ETF as a proxy
-                        const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
-                                            symbol === 'GSPC' ? 'SPY' : 
-                                            symbol === 'IXIC' ? 'QQQ' : symbol;
-                        
-                        // Format dates for API in UNIX timestamp (seconds)
-                        const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
-                        const now = new Date();
-                        const endDate = toUnixTimestamp(now);
-                        const startDate = toUnixTimestamp(new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)); // 14 days ago
-                        
-                        // Direct API call (no proxy)
-                        const url = `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`;
-                        
+                        // Global quote endpoint is more request-efficient
+                        const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${index.symbol}&apikey=${apiKey}`;
                         console.log(`Fetching data for ${index.name}`);
+                        
                         const response = await axios.get(url);
                         
-                        if (response.data && response.data.s === 'ok' && response.data.c && response.data.t) {
-                            console.log(`Received valid data for ${index.name}`);
-                            const prices = response.data.c;
-                            const timestamps = response.data.t;
+                        if (response.data && response.data['Global Quote']) {
+                            const quote = response.data['Global Quote'];
                             
-                            // Map dates to their closest data points
-                            for (let dayIndex = 0; dayIndex < resultData.length; dayIndex++) {
-                                const targetDate = resultData[dayIndex].date;
-                                const targetTime = toUnixTimestamp(targetDate);
+                            if (quote['05. price'] && quote['10. change percent']) {
+                                const price = parseFloat(quote['05. price']).toFixed(2);
+                                // Remove the % sign and convert to number
+                                const changePercent = parseFloat(quote['10. change percent'].replace('%', '')).toFixed(2);
                                 
-                                // Find closest timestamp (within 24 hours)
-                                let closestIdx = -1;
-                                let prevIdx = -1;
+                                // Update the data for this index
+                                resultData[0].indices[i].value = price;
+                                resultData[0].indices[i].percentChange = changePercent;
                                 
-                                for (let j = 0; j < timestamps.length; j++) {
-                                    if (Math.abs(timestamps[j] - targetTime) < 86400) {
-                                        closestIdx = j;
-                                        prevIdx = j > 0 ? j - 1 : -1;
-                                        break;
-                                    }
-                                }
-                                
-                                if (closestIdx >= 0) {
-                                    // Set the value for this day
-                                    resultData[dayIndex].indices[indexIdx].value = prices[closestIdx].toFixed(2);
-                                    
-                                    // Calculate percentage change if we have previous data
-                                    if (prevIdx >= 0) {
-                                        const percentChange = ((prices[closestIdx] - prices[prevIdx]) / prices[prevIdx] * 100).toFixed(2);
-                                        resultData[dayIndex].indices[indexIdx].percentChange = percentChange;
-                                    }
-                                }
+                                console.log(`Successfully fetched data for ${index.name}: ${price} (${changePercent}%)`);
+                            } else {
+                                console.error(`Missing price or change data for ${index.name}`);
                             }
                         } else {
-                            console.warn(`Invalid or empty data received for ${index.name}`);
-                            throw new Error(`Invalid data for ${index.name}`);
+                            console.error(`Invalid response for ${index.name}:`, response.data);
+                            if (response.data && response.data.Note && response.data.Note.includes('call frequency')) {
+                                throw new Error("API call frequency exceeded. Please try again in a minute.");
+                            }
                         }
                     } catch (err) {
                         console.error(`Error fetching data for ${index.name}:`, err);
-                        throw err; // Re-throw to be caught by caller
+                        // Continue with next index instead of failing completely
                     }
                 }
                 
-                // Check if we got any real data
-                const hasRealData = resultData.some(day => 
-                    day.indices.some(index => parseFloat(index.value) > 0)
-                );
+                // Check if we received any valid data
+                const hasRealData = resultData[0].indices.some(index => parseFloat(index.value) > 0);
                 
                 if (!hasRealData) {
-                    throw new Error("No real data retrieved");
+                    throw new Error("No valid data received from Alpha Vantage. Please check your API key.");
                 }
                 
                 return resultData;
@@ -541,6 +526,7 @@
             const fetchData = async (apiKey = null) => {
                 setLoading(true);
                 setError(null);
+                setApiErrorMessage('');
                 
                 try {
                     let data;
@@ -550,12 +536,13 @@
                         try {
                             console.log("Attempting to fetch real data");
                             data = await fetchRealData(apiKey);
-                            source = 'real';
+                            source = `real (${requestCount}/25 daily requests used)`;
                             console.log("Successfully fetched real data");
                         } catch (err) {
                             console.error("Error fetching real data, falling back to mock:", err);
                             data = generateMockData();
                             source = 'simulated (API error)';
+                            setApiErrorMessage(`API Error: ${err.message}`);
                         }
                     } else {
                         data = generateMockData();
@@ -575,37 +562,19 @@
                 }
             };
             
-            // Load data on mount
+            // Load data on mount - only once, no periodic updates
             useEffect(() => {
-                fetchData();
+                // Initial data fetch
+                if (apiKey && useRealData) {
+                    fetchData(apiKey);
+                } else {
+                    fetchData(null);
+                }
                 
-                // Set up polling interval (every 5 minutes if market is open)
-                const intervalId = setInterval(() => {
-                    const marketOpen = checkMarketOpen();
-                    setIsMarketOpen(marketOpen);
-                    
-                    if (marketOpen) {
-                        fetchData(useRealData ? apiKeyInput : null);
-                    }
-                }, 5 * 60 * 1000);
+                // Check if market is open
+                setIsMarketOpen(checkMarketOpen());
                 
-                // Set up a daily refresh at midnight
-                const setupDailyRefresh = () => {
-                    const now = new Date();
-                    const midnight = new Date(now);
-                    midnight.setHours(24, 0, 0, 0);
-                    
-                    const timeUntilMidnight = midnight.getTime() - now.getTime();
-                    
-                    setTimeout(() => {
-                        fetchData(useRealData ? apiKeyInput : null);
-                        setupDailyRefresh(); // Setup for next day
-                    }, timeUntilMidnight);
-                };
-                
-                setupDailyRefresh();
-                
-                return () => clearInterval(intervalId);
+                // No interval for periodic updates to conserve API calls
             }, []);
             
             // API Key Form
@@ -613,23 +582,34 @@
                 return (
                     <div className="api-key-form">
                         <h1 style={{marginBottom: "20px"}}>Stock Indices Dashboard</h1>
-                        <h2 style={{marginBottom: "10px"}}>Enter your Finnhub API Key</h2>
+                        <h2 style={{marginBottom: "10px"}}>Enter Alpha Vantage API Key</h2>
                         <p style={{marginBottom: "20px", color: "#666"}}>
-                            This will not be stored persistently - you'll need to re-enter it if you refresh the page
+                            Get a free API key at <a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener noreferrer">alphavantage.co</a>
                         </p>
                         <input 
                             className="input-field"
                             type="text" 
-                            placeholder="Your Finnhub API Key"
+                            placeholder="Your Alpha Vantage API Key"
                             value={apiKeyInput}
                             onChange={(e) => setApiKeyInput(e.target.value)}
                         />
+                        
+                        {apiErrorMessage && (
+                            <div className="error-message">{apiErrorMessage}</div>
+                        )}
+                        
                         <button 
                             className="primary-button"
                             onClick={saveApiKeyAndFetch}
                         >
-                            Use This API Key
+                            Save Key & Fetch Data
                         </button>
+                        
+                        <div className="usage-info">
+                            Alpha Vantage free tier allows 25 API requests per day.<br/>
+                            This dashboard will only update when you manually refresh.
+                        </div>
+                        
                         <div style={{marginTop: "20px"}}>
                             <button 
                                 className="secondary-button"
@@ -653,7 +633,7 @@
                     <button 
                         className="primary-button"
                         style={{marginTop: "10px"}}
-                        onClick={() => fetchData(useRealData ? apiKeyInput : null)}
+                        onClick={() => fetchData(useRealData ? apiKey : null)}
                     >
                         Try Again
                     </button>
@@ -681,6 +661,12 @@
                             <span>Real API</span>
                         </div>
                         
+                        {useRealData && apiKey && (
+                            <div className="usage-info">
+                                API Requests Today: <span className="requests-counter">{requestCount}/25</span>
+                            </div>
+                        )}
+                        
                         {useRealData && (
                             <button 
                                 className="secondary-button"
@@ -693,11 +679,18 @@
                         <button 
                             className="secondary-button"
                             style={{marginLeft: "10px"}}
-                            onClick={() => fetchData(useRealData ? apiKeyInput : null)}
+                            onClick={() => fetchData(useRealData ? apiKey : null)}
+                            disabled={useRealData && requestCount >= 25}
                         >
                             Refresh Data
                         </button>
                     </div>
+                    
+                    {apiErrorMessage && useRealData && (
+                        <div className="error-message" style={{textAlign: "center", marginBottom: "15px"}}>
+                            {apiErrorMessage}
+                        </div>
+                    )}
                     
                     {stockData.map((dayData, dayIndex) => (
                         <div className="date-row" key={dayIndex}>
@@ -712,11 +705,6 @@
                             </div>
                             <div className="indices">
                                 {dayData.indices.map((index, indexIndex) => {
-                                    const weekChange = calculateWeekChange(
-                                        stockData.map(d => d.indices[indexIndex]),
-                                        dayIndex
-                                    );
-                                    
                                     return (
                                         <div className="index-box" key={index.symbol}>
                                             <div className="index-name">{index.name}</div>
@@ -724,11 +712,6 @@
                                             <div className={`percentage ${parseFloat(index.percentChange) >= 0 ? 'positive' : 'negative'}`}>
                                                 {parseFloat(index.percentChange) >= 0 ? '+' : ''}{index.percentChange}%
                                             </div>
-                                            {dayIndex === 0 && weekChange && (
-                                                <div className="week-change">
-                                                    Week: {parseFloat(weekChange) >= 0 ? '+' : ''}{weekChange}%
-                                                </div>
-                                            )}
                                         </div>
                                     );
                                 })}
