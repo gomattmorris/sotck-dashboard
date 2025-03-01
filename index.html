@@ -216,11 +216,33 @@
                 const data = [];
                 const today = new Date();
                 
-                // Generate fallback data for 5 days
-                for (let i = 0; i < 5; i++) {
+                // Generate fallback data for the last 5 trading days
+                let dayCounter = 0;
+                const tradingDays = [];
+                
+                // Find the last 5 trading days
+                while (tradingDays.length < 5) {
                     const date = new Date();
-                    date.setDate(today.getDate() - i);
+                    date.setDate(today.getDate() - dayCounter);
                     
+                    if (isTradingDay(date)) {
+                        // If today is a weekend, skip it
+                        if (dayCounter === 0) {
+                            const currentDay = date.getDay();
+                            if (currentDay >= 1 && currentDay <= 5) {
+                                tradingDays.push(date);
+                            }
+                        } else {
+                            tradingDays.push(date);
+                        }
+                    }
+                    
+                    dayCounter++;
+                    if (dayCounter > 10) break;
+                }
+                
+                // Generate mock data for these trading days
+                for (const date of tradingDays) {
                     const dayData = {
                         date: date,
                         indices: INDICES.map(index => {
@@ -285,18 +307,6 @@
                         if (dayCounter > 20) break;
                     }
                     
-                    // Make sure we have 5 trading days - if today is weekend, we'll have 4
-                    while (tradingDays.length < 5 && dayCounter < 20) {
-                        const date = new Date();
-                        date.setDate(today.getDate() - dayCounter);
-                        
-                        if (isTradingDay(date) && !tradingDays.includes(date)) {
-                            tradingDays.push(date);
-                        }
-                        
-                        dayCounter++;
-                    }
-                    
                     // Sort trading days in descending order (newest first)
                     tradingDays.sort((a, b) => b - a);
                     
@@ -311,88 +321,101 @@
                         }))
                     }));
                     
-                    // Fetch data for each index
-                    const promises = INDICES.map(async (index, indexIdx) => {
-                        try {
-                            // Remove the ^ character from indices symbols for Finnhub
-                            const symbol = index.symbol.replace('^', '');
-                            
-                            // For Dow Jones, use the DIA ETF as a proxy
-                            const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
-                                                symbol === 'GSPC' ? 'SPY' : 
-                                                symbol === 'IXIC' ? 'QQQ' : symbol;
-                            
-                            // Get historical data for all days at once
-                            // Format dates for API in UNIX timestamp (seconds)
-                            const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
-                            
-                            // We'll get candle data for the last 10 days to have enough data
-                            const endDate = toUnixTimestamp(today);
-                            const startDate = toUnixTimestamp(new Date(today.getTime() - 10 * 24 * 60 * 60 * 1000));
-                            
-                            const candleResponse = await axios.get(
-                                `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`
-                            );
-                            
-                            if (candleResponse.data && candleResponse.data.c && candleResponse.data.t) {
-                                // Process historical data
-                                const closePrices = candleResponse.data.c;
-                                const timestamps = candleResponse.data.t;
+                    try {
+                        // Fetch data for each index
+                        const promises = INDICES.map(async (index, indexIdx) => {
+                            try {
+                                // Remove the ^ character from indices symbols for Finnhub
+                                const symbol = index.symbol.replace('^', '');
                                 
-                                // Create a map of timestamp to closing price
-                                const priceMap = {};
-                                for (let i = 0; i < timestamps.length; i++) {
-                                    priceMap[timestamps[i]] = closePrices[i];
-                                }
+                                // For Dow Jones, use the DIA ETF as a proxy
+                                const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
+                                                    symbol === 'GSPC' ? 'SPY' : 
+                                                    symbol === 'IXIC' ? 'QQQ' : symbol;
                                 
-                                // Match each trading day with its corresponding price data
-                                for (let dayIndex = 0; dayIndex < resultData.length; dayIndex++) {
-                                    const dayTimestamp = toUnixTimestamp(resultData[dayIndex].date);
+                                // Format dates for API in UNIX timestamp (seconds)
+                                const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
+                                const endDate = toUnixTimestamp(new Date());
+                                const startDate = toUnixTimestamp(new Date(endDate * 1000 - 14 * 86400 * 1000)); // 14 days ago
+                                
+                                // Get historical data
+                                const response = await axios.get(
+                                    `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`
+                                );
+                                
+                                if (response.data && response.data.s === 'ok' && response.data.c && response.data.t) {
+                                    const prices = response.data.c;
+                                    const timestamps = response.data.t;
                                     
-                                    // Find the closest earlier timestamp
-                                    let closestTimestamp = 0;
-                                    let prevTimestamp = 0;
-                                    
-                                    for (let i = 0; i < timestamps.length; i++) {
-                                        // If we find an exact match
-                                        if (Math.abs(timestamps[i] - dayTimestamp) < 86400) { // Within 24 hours
-                                            closestTimestamp = timestamps[i];
-                                            
-                                            // Find previous day for percentage change
-                                            if (i > 0) {
-                                                prevTimestamp = timestamps[i-1];
-                                            }
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (closestTimestamp && priceMap[closestTimestamp]) {
-                                        resultData[dayIndex].indices[indexIdx].value = priceMap[closestTimestamp].toFixed(2);
+                                    // Map dates to their closest data points
+                                    for (let i = 0; i < resultData.length; i++) {
+                                        const targetDate = resultData[i].date;
+                                        const targetTime = toUnixTimestamp(targetDate);
                                         
-                                        // Calculate percent change if we have previous day data
-                                        if (prevTimestamp && priceMap[prevTimestamp]) {
-                                            const currentPrice = priceMap[closestTimestamp];
-                                            const prevPrice = priceMap[prevTimestamp];
-                                            resultData[dayIndex].indices[indexIdx].percentChange = 
-                                                ((currentPrice - prevPrice) / prevPrice * 100).toFixed(2);
+                                        // Find closest timestamp (within 24 hours)
+                                        let closestIdx = -1;
+                                        let prevIdx = -1;
+                                        
+                                        for (let j = 0; j < timestamps.length; j++) {
+                                            if (Math.abs(timestamps[j] - targetTime) < 86400) {
+                                                closestIdx = j;
+                                                prevIdx = j > 0 ? j - 1 : -1;
+                                                break;
+                                            }
+                                        }
+                                        
+                                        if (closestIdx >= 0) {
+                                            // Set the value for this day
+                                            resultData[i].indices[indexIdx].value = prices[closestIdx].toFixed(2);
+                                            
+                                            // Calculate percentage change if we have previous data
+                                            if (prevIdx >= 0) {
+                                                const percentChange = ((prices[closestIdx] - prices[prevIdx]) / prices[prevIdx] * 100).toFixed(2);
+                                                resultData[i].indices[indexIdx].percentChange = percentChange;
+                                            }
                                         }
                                     }
                                 }
+                            } catch (err) {
+                                console.error(`Error fetching data for ${index.name}:`, err);
                             }
-                        } catch (err) {
-                            console.error(`Error fetching data for ${index.name}:`, err);
-                        }
-                    });
+                        });
+                        
+                        await Promise.all(promises);
+                    } catch (fetchError) {
+                        console.error("Error during data fetching:", fetchError);
+                        // Use fallback data on fetch error
+                        const fallbackData = handleApiError();
+                        setStockData(fallbackData);
+                        setLastUpdated(new Date());
+                        setIsMarketOpen(checkMarketOpen());
+                        setLoading(false);
+                        return;
+                    }
                     
-                    await Promise.all(promises);
+                    // Check if we retrieved any real data, use fallback if not
+                    const hasRealData = resultData.some(day => 
+                        day.indices.some(index => parseFloat(index.value) > 0)
+                    );
                     
-                    setStockData(resultData);
+                    if (!hasRealData) {
+                        console.error("No real data retrieved, using fallback");
+                        const fallbackData = handleApiError();
+                        setStockData(fallbackData);
+                    } else {
+                        setStockData(resultData);
+                    }
+                    
                     setLastUpdated(new Date());
                     setIsMarketOpen(checkMarketOpen());
                     setLoading(false);
                 } catch (err) {
                     console.error("Failed to fetch stock data:", err);
-                    setError("Failed to fetch stock data. Please try again later.");
+                    // Use fallback data on any error
+                    const fallbackData = handleApiError();
+                    setStockData(fallbackData);
+                    setLastUpdated(new Date());
+                    setIsMarketOpen(checkMarketOpen());
                     setLoading(false);
                 }
             };
