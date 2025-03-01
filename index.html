@@ -244,11 +244,11 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
         
-        // Indices to track (with their Alpha Vantage symbols)
+        // Real indices with multipliers to get actual index values from ETFs
         const INDICES = [
-            { symbol: "DIA", name: "Dow Jones" },
-            { symbol: "SPY", name: "S&P 500" },
-            { symbol: "QQQ", name: "NASDAQ" }
+            { symbol: "DIA", name: "Dow Jones", multiplier: 100, actualValue: 33000 },
+            { symbol: "SPY", name: "S&P 500", multiplier: 10, actualValue: 5000 },
+            { symbol: "QQQ", name: "NASDAQ", multiplier: 40, actualValue: 18000 }
         ];
         
         function StockDashboard() {
@@ -325,6 +325,12 @@
                     month: 'short',
                     day: 'numeric'
                 });
+            };
+            
+            // Calculate the actual index value from ETF price
+            const calculateActualIndexValue = (etfPrice, index) => {
+                // This is an approximation - ETFs track indices but aren't exact multiples
+                return parseFloat(etfPrice) * index.multiplier;
             };
             
             // Function to fetch data from Alpha Vantage
@@ -417,11 +423,9 @@
                 // Convert to array and sort descending (newest first)
                 const sortedDates = Array.from(allDates).sort().reverse();
                 
-                // Keep only trading days (Mon-Fri)
-                const tradingDates = sortedDates.filter(dateStr => {
-                    const date = new Date(dateStr);
-                    return isTradingDay(date);
-                });
+                // Keep only trading days (Mon-Fri) - now done implicitly by API results
+                // The API only returns trading days, so no need to filter by day of week
+                const tradingDates = sortedDates;
                 
                 // Take only the 5 most recent trading days
                 const recentDates = tradingDates.slice(0, 5);
@@ -437,11 +441,15 @@
                             
                             // Default values if no data available
                             let value = 0;
+                            let etfValue = 0;
                             let percentChange = 0;
                             
                             if (data && data[dateStr]) {
-                                // Get current day's closing price
-                                const currentClose = parseFloat(data[dateStr]['4. close']);
+                                // Get current day's closing price for the ETF
+                                etfValue = parseFloat(data[dateStr]['4. close']);
+                                
+                                // Convert to actual index value using multiplier
+                                value = calculateActualIndexValue(etfValue, index);
                                 
                                 // Find the previous trading day
                                 const dateIndex = tradingDates.indexOf(dateStr);
@@ -450,16 +458,14 @@
                                 // Calculate percent change if previous day is available
                                 if (previousDateStr && data[previousDateStr]) {
                                     const previousClose = parseFloat(data[previousDateStr]['4. close']);
-                                    percentChange = ((currentClose - previousClose) / previousClose * 100);
+                                    percentChange = ((etfValue - previousClose) / previousClose * 100);
                                 }
-                                
-                                value = currentClose;
                             }
                             
                             return {
                                 symbol: index.symbol,
                                 name: index.name,
-                                value: value.toFixed(2),
+                                value: value.toFixed(0), // No decimals for index values
                                 percentChange: percentChange.toFixed(2)
                             };
                         })
