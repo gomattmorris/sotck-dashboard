@@ -1,12 +1,4 @@
-// Function to check if market is currently open
-            const checkMarketOpen = () => {
-                const now = new Date();
-                const day = now.getDay();
-                const hours = now.getHours();
-                
-                // Market is open Monday-Friday, 9:30 AM - 4:00 PM ET (simplified)
-                return day >= 1 && day <= 5 && hours >= 9 && hours < 16;
-            };<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -15,7 +7,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.21.2/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.3.4/axios.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -166,23 +157,25 @@
             { symbol: "^IXIC", name: "NASDAQ" }
         ];
         
+        // Due to CORS issues with Finnhub, we'll use mock data only for this personal dashboard
         function StockDashboard() {
             const [stockData, setStockData] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [lastUpdated, setLastUpdated] = useState(null);
             const [isMarketOpen, setIsMarketOpen] = useState(false);
-            const [apiKey, setApiKey] = useState(() => {
-                return localStorage.getItem('finnhubApiKey') || '';
-            });
             
-            // Function to save API key
-            const saveApiKey = (key) => {
-                localStorage.setItem('finnhubApiKey', key);
-                setApiKey(key);
+            // Function to check if market is currently open
+            const checkMarketOpen = () => {
+                const now = new Date();
+                const day = now.getDay();
+                const hours = now.getHours();
+                
+                // Market is open Monday-Friday, 9:30 AM - 4:00 PM ET (simplified)
+                return day >= 1 && day <= 5 && hours >= 9 && hours < 16;
             };
             
-            // Function to check if a date is a trading day (M-F, excluding today if it's a weekend)
+            // Function to check if a date is a trading day (M-F)
             const isTradingDay = (date) => {
                 const day = date.getDay();
                 return day >= 1 && day <= 5; // Monday through Friday
@@ -210,15 +203,12 @@
                 return null;
             };
             
-            // Handle API errors by using fallback data
-            const handleApiError = () => {
-                console.log("Using fallback data due to API error");
-                const data = [];
+            // Generate realistic mock data with daily trends
+            const generateMockData = () => {
+                console.log("Generating mock data for display");
                 const today = new Date();
-                
-                // Generate fallback data for the last 5 trading days
-                let dayCounter = 0;
                 const tradingDays = [];
+                let dayCounter = 0;
                 
                 // Find the last 5 trading days
                 while (tradingDays.length < 5) {
@@ -226,7 +216,7 @@
                     date.setDate(today.getDate() - dayCounter);
                     
                     if (isTradingDay(date)) {
-                        // If today is a weekend, skip it
+                        // For current day, only include if it's a weekday
                         if (dayCounter === 0) {
                             const currentDay = date.getDay();
                             if (currentDay >= 1 && currentDay <= 5) {
@@ -238,293 +228,109 @@
                     }
                     
                     dayCounter++;
-                    if (dayCounter > 10) break;
+                    if (dayCounter > 10) break; // Safety check
                 }
                 
-                // Generate mock data for these trading days
-                for (const date of tradingDays) {
-                    const dayData = {
+                // Make the data somewhat realistic with trends
+                // Base values for indices
+                const baseValues = {
+                    "^DJI": 33900,
+                    "^GSPC": 4130,
+                    "^IXIC": 12800
+                };
+                
+                // Generate a random trend direction and magnitude for the week
+                const trends = INDICES.map(index => {
+                    const trend = Math.random() * 2 - 1; // Between -1 and 1
+                    return {
+                        symbol: index.symbol,
+                        trend: trend,
+                        volatility: Math.random() * 0.5 + 0.5 // Between 0.5 and 1
+                    };
+                });
+                
+                // Generate data for each trading day
+                const mockData = tradingDays.map((date, dateIndex) => {
+                    return {
                         date: date,
-                        indices: INDICES.map(index => {
-                            const baseValue = index.symbol === "^DJI" ? 34000 : 
-                                             index.symbol === "^GSPC" ? 4200 : 14000;
-                            const randomChange = (Math.random() * 3 - 1.5).toFixed(2);
-                            const value = baseValue + (baseValue * (randomChange / 100));
+                        indices: INDICES.map((index, indexIndex) => {
+                            const trend = trends.find(t => t.symbol === index.symbol);
+                            const baseValue = baseValues[index.symbol];
+                            
+                            // Calculate the value with some randomness but following the trend
+                            const dayOffset = (5 - dateIndex) / 5; // Newer days have larger effect
+                            const trendEffect = trend.trend * dayOffset * 0.05; // Up to 5% trend effect
+                            const randomNoise = (Math.random() - 0.5) * trend.volatility * 0.02; // Up to 2% random noise
+                            
+                            const changePercent = (trendEffect + randomNoise) * 100;
+                            const adjustedValue = baseValue * (1 + trendEffect + randomNoise);
                             
                             return {
                                 symbol: index.symbol,
                                 name: index.name,
-                                value: value.toFixed(2),
-                                percentChange: randomChange
+                                value: adjustedValue.toFixed(2),
+                                percentChange: dateIndex === 0 ? changePercent.toFixed(2) : 
+                                               (changePercent * (Math.random() * 0.5 + 0.75)).toFixed(2) // Slightly different for older days
                             };
                         })
                     };
-                    
-                    data.push(dayData);
-                }
+                });
                 
-                return data;
+                return mockData;
             };
             
-            // Function to fetch stock data from Finnhub
-            const fetchStockData = async () => {
-                if (!apiKey) {
-                    setError("Please enter your Finnhub API key");
-                    setLoading(false);
-                    return;
-                }
+            // Function to load mock data
+            const loadMockData = () => {
+                setLoading(true);
                 
                 try {
-                    setLoading(true);
-                    
-                    // Get trading days (we'll need more than 5 to ensure we get 5 actual trading days)
-                    const tradingDays = [];
-                    const today = new Date();
-                    let dayCounter = 0;
-                    
-                    // Collect the last 5 trading days (weekdays)
-                    while (tradingDays.length < 5) {
-                        const date = new Date();
-                        date.setDate(today.getDate() - dayCounter);
-                        
-                        // Only include weekdays
-                        if (isTradingDay(date)) {
-                            // For current day, only include if market has opened today
-                            // (prevents showing Saturday/Sunday as current day)
-                            if (dayCounter === 0) {
-                                const currentDay = date.getDay();
-                                if (currentDay >= 1 && currentDay <= 5) {
-                                    tradingDays.push(date);
-                                }
-                            } else {
-                                tradingDays.push(date);
-                            }
-                        }
-                        
-                        dayCounter++;
-                        
-                        // Safety check to prevent infinite loop
-                        if (dayCounter > 20) break;
-                    }
-                    
-                    // Sort trading days in descending order (newest first)
-                    tradingDays.sort((a, b) => b - a);
-                    
-                    // Prepare result data structure
-                    const resultData = tradingDays.map(date => ({
-                        date: date,
-                        indices: INDICES.map(index => ({
-                            symbol: index.symbol,
-                            name: index.name,
-                            value: 0,
-                            percentChange: 0
-                        }))
-                    }));
-                    
-                    try {
-                        // Fetch data for each index
-                        const promises = INDICES.map(async (index, indexIdx) => {
-                            try {
-                                // Remove the ^ character from indices symbols for Finnhub
-                                const symbol = index.symbol.replace('^', '');
-                                
-                                // For Dow Jones, use the DIA ETF as a proxy
-                                const finnhubSymbol = symbol === 'DJI' ? 'DIA' : 
-                                                    symbol === 'GSPC' ? 'SPY' : 
-                                                    symbol === 'IXIC' ? 'QQQ' : symbol;
-                                
-                                // Format dates for API in UNIX timestamp (seconds)
-                                const toUnixTimestamp = (date) => Math.floor(date.getTime() / 1000);
-                                const endDate = toUnixTimestamp(new Date());
-                                const startDate = toUnixTimestamp(new Date(endDate * 1000 - 14 * 86400 * 1000)); // 14 days ago
-                                
-                                // Get historical data
-                                const response = await axios.get(
-                                    `https://finnhub.io/api/v1/stock/candle?symbol=${finnhubSymbol}&resolution=D&from=${startDate}&to=${endDate}&token=${apiKey}`
-                                );
-                                
-                                if (response.data && response.data.s === 'ok' && response.data.c && response.data.t) {
-                                    const prices = response.data.c;
-                                    const timestamps = response.data.t;
-                                    
-                                    // Map dates to their closest data points
-                                    for (let i = 0; i < resultData.length; i++) {
-                                        const targetDate = resultData[i].date;
-                                        const targetTime = toUnixTimestamp(targetDate);
-                                        
-                                        // Find closest timestamp (within 24 hours)
-                                        let closestIdx = -1;
-                                        let prevIdx = -1;
-                                        
-                                        for (let j = 0; j < timestamps.length; j++) {
-                                            if (Math.abs(timestamps[j] - targetTime) < 86400) {
-                                                closestIdx = j;
-                                                prevIdx = j > 0 ? j - 1 : -1;
-                                                break;
-                                            }
-                                        }
-                                        
-                                        if (closestIdx >= 0) {
-                                            // Set the value for this day
-                                            resultData[i].indices[indexIdx].value = prices[closestIdx].toFixed(2);
-                                            
-                                            // Calculate percentage change if we have previous data
-                                            if (prevIdx >= 0) {
-                                                const percentChange = ((prices[closestIdx] - prices[prevIdx]) / prices[prevIdx] * 100).toFixed(2);
-                                                resultData[i].indices[indexIdx].percentChange = percentChange;
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (err) {
-                                console.error(`Error fetching data for ${index.name}:`, err);
-                            }
-                        });
-                        
-                        await Promise.all(promises);
-                    } catch (fetchError) {
-                        console.error("Error during data fetching:", fetchError);
-                        // Use fallback data on fetch error
-                        const fallbackData = handleApiError();
-                        setStockData(fallbackData);
-                        setLastUpdated(new Date());
-                        setIsMarketOpen(checkMarketOpen());
-                        setLoading(false);
-                        return;
-                    }
-                    
-                    // Check if we retrieved any real data, use fallback if not
-                    const hasRealData = resultData.some(day => 
-                        day.indices.some(index => parseFloat(index.value) > 0)
-                    );
-                    
-                    if (!hasRealData) {
-                        console.error("No real data retrieved, using fallback");
-                        const fallbackData = handleApiError();
-                        setStockData(fallbackData);
-                    } else {
-                        setStockData(resultData);
-                    }
-                    
+                    const mockData = generateMockData();
+                    setStockData(mockData);
                     setLastUpdated(new Date());
                     setIsMarketOpen(checkMarketOpen());
                     setLoading(false);
                 } catch (err) {
-                    console.error("Failed to fetch stock data:", err);
-                    // Use fallback data on any error
-                    const fallbackData = handleApiError();
-                    setStockData(fallbackData);
-                    setLastUpdated(new Date());
-                    setIsMarketOpen(checkMarketOpen());
+                    console.error("Error generating mock data:", err);
+                    setError("Failed to load data. Please refresh the page.");
                     setLoading(false);
                 }
             };
             
-            // Fetch data on component mount and set up interval if market is open
+            // Load data on mount and set up refresh
             useEffect(() => {
-                if (apiKey) {
-                    fetchStockData();
+                loadMockData();
+                
+                // Set up polling interval (every 5 minutes if market is open)
+                const intervalId = setInterval(() => {
+                    const marketOpen = checkMarketOpen();
+                    setIsMarketOpen(marketOpen);
                     
-                    // Set up polling interval (every 5 minutes if market is open)
-                    const intervalId = setInterval(() => {
-                        const marketOpen = checkMarketOpen();
-                        setIsMarketOpen(marketOpen);
-                        
-                        if (marketOpen) {
-                            fetchStockData();
-                        }
-                    }, 5 * 60 * 1000);
+                    if (marketOpen) {
+                        loadMockData();
+                    }
+                }, 5 * 60 * 1000);
+                
+                // Set up a daily refresh at midnight
+                const setupDailyRefresh = () => {
+                    const now = new Date();
+                    const midnight = new Date(now);
+                    midnight.setHours(24, 0, 0, 0);
                     
-                    // Set up a daily refresh at midnight to update the previous days' data
-                    const setupDailyRefresh = () => {
-                        const now = new Date();
-                        const midnight = new Date(now);
-                        midnight.setHours(24, 0, 0, 0);
-                        
-                        const timeUntilMidnight = midnight.getTime() - now.getTime();
-                        
-                        setTimeout(() => {
-                            fetchStockData();
-                            setupDailyRefresh(); // Setup for next day
-                        }, timeUntilMidnight);
-                    };
+                    const timeUntilMidnight = midnight.getTime() - now.getTime();
                     
-                    setupDailyRefresh();
-                    
-                    return () => clearInterval(intervalId);
-                }
-            }, [apiKey]);
-            
-            // API Key Form
-            if (!apiKey) {
-                return (
-                    <div className="api-key-form" style={{
-                        maxWidth: "500px",
-                        margin: "50px auto",
-                        padding: "30px",
-                        borderRadius: "10px",
-                        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                        backgroundColor: "white",
-                        textAlign: "center"
-                    }}>
-                        <h1 style={{marginBottom: "20px"}}>Stock Indices Dashboard</h1>
-                        <h2 style={{marginBottom: "10px"}}>Enter your Finnhub API Key</h2>
-                        <p style={{marginBottom: "20px", color: "#666"}}>
-                            Your key will be stored in your browser only and never shared
-                        </p>
-                        <input 
-                            type="text" 
-                            placeholder="Your Finnhub API Key"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            style={{
-                                width: "100%",
-                                padding: "10px",
-                                marginBottom: "15px",
-                                borderRadius: "5px",
-                                border: "1px solid #ddd"
-                            }}
-                        />
-                        <button 
-                            onClick={() => saveApiKey(apiKey)}
-                            style={{
-                                backgroundColor: "#4CAF50",
-                                color: "white",
-                                padding: "10px 20px",
-                                border: "none",
-                                borderRadius: "5px",
-                                cursor: "pointer",
-                                fontSize: "16px"
-                            }}
-                        >
-                            Save Key & Load Dashboard
-                        </button>
-                    </div>
-                );
-            }
+                    setTimeout(() => {
+                        loadMockData();
+                        setupDailyRefresh(); // Setup for next day
+                    }, timeUntilMidnight);
+                };
+                
+                setupDailyRefresh();
+                
+                return () => clearInterval(intervalId);
+            }, []);
             
             if (loading) return <div>Loading stock data...</div>;
-            if (error) return (
-                <div>
-                    <p>{error}</p>
-                    {error.includes("API key") && (
-                        <button 
-                            onClick={() => setApiKey('')}
-                            style={{
-                                marginTop: "10px",
-                                padding: "5px 10px",
-                                backgroundColor: "#f44336",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "4px",
-                                cursor: "pointer"
-                            }}
-                        >
-                            Enter New API Key
-                        </button>
-                    )}
-                </div>
-            );
+            if (error) return <div>{error}</div>;
             
             return (
                 <div className="dashboard">
@@ -534,7 +340,7 @@
                             Showing data for the most recent trading days
                         </p>
                         <button 
-                            onClick={() => setApiKey('')}
+                            onClick={loadMockData}
                             style={{
                                 marginTop: "10px",
                                 padding: "5px 10px",
@@ -546,7 +352,7 @@
                                 fontSize: "12px"
                             }}
                         >
-                            Change API Key
+                            Refresh Data
                         </button>
                     </div>
                     
@@ -589,6 +395,9 @@
                     
                     <div className="last-updated">
                         Last updated: {lastUpdated?.toLocaleTimeString()}
+                        <p style={{fontSize: "12px", marginTop: "5px", color: "#999"}}>
+                            * Using simulated data due to API limitations
+                        </p>
                     </div>
                 </div>
             );
